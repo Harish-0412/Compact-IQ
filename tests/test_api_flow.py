@@ -196,6 +196,45 @@ def test_temporary_rule_candidate_review_endpoint_updates_status():
     assert refreshed.json()["review_status"] == "approved"
 
 
+def test_frontend_compatibility_routes_return_safe_placeholders():
+    health_services = client.get("/api/health/services")
+    devices = client.get("/api/devices")
+    compliance = client.get("/api/compliance/summary")
+    assistant = client.post("/api/assistant/query", json={"query": "status"})
+
+    assert health_services.status_code == 200
+    assert health_services.json()["inventory"] == "pending_backend_integration"
+    assert devices.status_code == 200
+    assert devices.json() == []
+    assert compliance.status_code == 200
+    assert compliance.json()["is_temporary_frontend_compatibility_stub"] is True
+    assert assistant.status_code == 200
+    assert assistant.json()["is_temporary_frontend_compatibility_stub"] is True
+
+
+def test_frontend_rule_candidate_aliases_use_existing_backend_data():
+    document_id = upload_file(
+        "mock_release_notes.txt",
+        b"Windows Server 2012 requires BIOS 1.3.5 or later.",
+        "text/plain",
+    )
+    client.post(f"/api/documents/{document_id}/run-docintel-pipeline")
+
+    candidates = client.get("/api/rules/candidates")
+    assert candidates.status_code == 200
+    assert candidates.json()
+    candidate_id = candidates.json()[0]["candidate_id"]
+
+    approve = client.post(f"/api/rules/candidates/{candidate_id}/approve")
+    assert approve.status_code == 200
+    assert approve.json()["review_status"] == "approved"
+    assert approve.json()["is_temporary_review_flow"] is True
+
+    approved = client.get("/api/rules/approved")
+    assert approved.status_code == 200
+    assert any(item["candidate_id"] == candidate_id for item in approved.json())
+
+
 def test_openapi_contains_expected_tags():
     response = client.get("/openapi.json")
 

@@ -5,6 +5,7 @@ from app.api.chunks import router as chunks_router
 from app.api.debug import router as debug_router
 from app.api.documents import router as documents_router
 from app.api.export import router as export_router
+from app.api.frontend_compat import router as frontend_compat_router
 from app.api.health import router as health_router
 from app.api.rule_candidates import router as rule_candidates_router
 from app.core.config import get_settings
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(debug_router, prefix="/api")
     app.include_router(export_router, prefix="/api")
     app.include_router(rule_candidates_router, prefix="/api")
+    app.include_router(frontend_compat_router, prefix="/api")
 
     return app
 
