@@ -33,6 +33,20 @@ class RuleCandidateListResponse(BaseModel):
     rule_candidates: list[RuleCandidateResponse]
 
 
+class RuleCandidateReviewRequest(BaseModel):
+    review_status: str
+    reviewed_by: str | None = None
+    edited_rule: dict | None = None
+    notes: str | None = None
+
+
+class RuleCandidateReviewResponse(BaseModel):
+    candidate_id: int
+    review_status: str
+    message: str
+    is_temporary_review_flow: bool = True
+
+
 class RuleExtractionResponse(BaseModel):
     document_id: str
     rule_candidates_created: int

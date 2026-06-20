@@ -4,6 +4,22 @@ FastAPI-first backend for the CompatIQ Member 3 Document Intelligence Engine.
 
 The service supports upload, profiling, extraction, chunking, mock/Ollama LLM rule extraction, deterministic normalization, local JSON exports, and teammate handoff endpoints. Final rule approval and compliance scanning are not implemented.
 
+## Repository Layout
+
+This branch combines the local FastAPI backend with the React frontend from `origin/Dharani-dev`.
+
+```text
+app/              FastAPI backend package
+scripts/          Backend utility scripts
+tests/            Backend tests
+streamlit_app/    Backend debug Streamlit UI
+client/           Vite React frontend
+docs/             Shared project/reference documentation
+schemas/          Shared source-of-truth JSON schemas
+```
+
+The backend currently remains at the repository root to avoid breaking imports and tests. The frontend is kept as a separate module under `client/`.
+
 ## Setup
 
 ```powershell
@@ -30,6 +46,41 @@ uvicorn app.main:app --reload
 ```
 
 Swagger UI is available at `http://127.0.0.1:8000/docs`.
+
+## Run the Frontend
+
+The frontend is a Vite React app in `client/`.
+
+```powershell
+cd client
+npm install
+npm run dev
+```
+
+By default the frontend should call:
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+Create `client/.env.local` if you need a different backend URL, for example `http://127.0.0.1:8001`.
+
+## Combined Local Run
+
+```powershell
+docker compose up -d
+python scripts/create_tables.py
+uvicorn app.main:app --reload
+```
+
+In another terminal:
+
+```powershell
+cd client
+npm run dev
+```
+
+Backend health should be available at `http://127.0.0.1:8000/api/health`.
 
 ## PostgreSQL
 

@@ -169,6 +169,33 @@ def test_export_normalized_rule_candidates():
     assert body["rule_candidates"][0]["review_status"] == "pending_review"
 
 
+def test_temporary_rule_candidate_review_endpoint_updates_status():
+    document_id = upload_file(
+        "mock_release_notes.txt",
+        b"Windows Server 2012 requires BIOS 1.3.5 or later.",
+        "text/plain",
+    )
+    client.post(f"/api/documents/{document_id}/run-docintel-pipeline")
+    candidates = client.get(f"/api/documents/{document_id}/rule-candidates").json()["rule_candidates"]
+    candidate_id = candidates[0]["candidate_id"]
+
+    response = client.patch(
+        f"/api/rule-candidates/{candidate_id}/review",
+        json={"review_status": "approved", "reviewed_by": "test"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidate_id"] == candidate_id
+    assert body["review_status"] == "approved"
+    assert body["is_temporary_review_flow"] is True
+    assert "pending backend integration" in body["message"]
+
+    refreshed = client.get(f"/api/rule-candidates/{candidate_id}")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["review_status"] == "approved"
+
+
 def test_openapi_contains_expected_tags():
     response = client.get("/openapi.json")
 
