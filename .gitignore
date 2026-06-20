@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.pytest_docintel.db
+.pytest_uploads/
+.env
+storage/uploads/*
+storage/extracted/*
+storage/exports/*
+!storage/uploads/.gitkeep
+!storage/extracted/.gitkeep
+!storage/exports/.gitkeep

@@ -1,0 +1,47 @@
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class RuleCandidateResponse(BaseModel):
+    candidate_id: int
+    document_id: str
+    source_chunk_id: int
+    rule_id: str | None
+    rule_type: str | None
+    condition_logic: str | None
+    conditions_json: dict | list | None
+    requirement_json: dict | list | None
+    severity: str | None
+    confidence_score: float | None
+    confidence_reason: str | None
+    explanation: str | None
+    source_excerpt: str
+    review_status: str
+    normalization_status: str
+    raw_llm_output_json: dict | list
+    normalized_rule_json: dict | list | None
+    validation_errors_json: dict | list | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RuleCandidateListResponse(BaseModel):
+    document_id: str
+    rule_candidates: list[RuleCandidateResponse]
+
+
+class RuleExtractionResponse(BaseModel):
+    document_id: str
+    rule_candidates_created: int
+    normalization_status: str
+    candidate_quality: dict = {}
+    pipeline_mode: str = "legacy"
+    total_objects: int = 0
+    processing_lane_summary: dict = {}
+    llm_call_count: int = 0
+    deterministic_candidate_count: int = 0
+    llm_candidate_count: int = 0
+    warnings: list[str]
