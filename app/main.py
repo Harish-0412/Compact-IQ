@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.assistant_guarded import router as assistant_guarded_router
 from app.api.chunks import router as chunks_router
 from app.api.debug import router as debug_router
 from app.api.documents import router as documents_router
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
             {"name": "Rule Candidates", "description": "Read, normalize, and export rule candidates."},
             {"name": "Debug", "description": "Demo and diagnostics endpoints."},
             {"name": "Export", "description": "Integration export endpoints for teammate services."},
+        {"name": "Assistant", "description": "Guarded assistant pipeline with scope, intent, evidence, and output validation."},
         ],
     )
 
@@ -47,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(export_router, prefix="/api")
     app.include_router(rule_candidates_router, prefix="/api")
     app.include_router(frontend_compat_router, prefix="/api")
+    app.include_router(assistant_guarded_router, prefix="/api")
 
     return app
 

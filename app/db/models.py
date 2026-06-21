@@ -182,6 +182,7 @@ class RuleCandidate(Base):
     raw_llm_output_json: Mapped[dict | list] = mapped_column(JSON, nullable=False)
     normalized_rule_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
     validation_errors_json: Mapped[dict | list | None] = mapped_column(JSON, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

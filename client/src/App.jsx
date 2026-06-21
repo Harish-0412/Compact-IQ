@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import DocumentIntelligenceWorkbench from "./components/document-intelligence/DocumentIntelligenceWorkbench";
+import GuardedAssistant from "./components/GuardedAssistant";
 
 // ─────────────────────────────────────────────
 // Constants
@@ -430,7 +431,7 @@ function App() {
             />
           )}
           {page === "Assistant"  && (
-            <Assistant
+            <GuardedAssistant
               backendOnline={backendOnline}
               analysisRun={analysisRun}
               devicesCount={devicesCount}
