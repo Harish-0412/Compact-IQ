@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError, ErrorResponse
@@ -10,7 +11,13 @@ from app.services.normalization_service import NormalizationService
 
 router = APIRouter(prefix="/rule-candidates", tags=["Rule Candidates"], responses={404: {"model": ErrorResponse}})
 
-ALLOWED_REVIEW_STATUSES = {"pending_review", "approved", "rejected", "needs_clarification"}
+ALLOWED_REVIEW_STATUSES = {
+    "pending_review",
+    "approved",
+    "rejected",
+    "needs_clarification",
+    "staged",          # Intermediate: approved → staged → promoted
+}
 
 
 @router.get("", response_model=list[RuleCandidateResponse])
@@ -53,7 +60,15 @@ def update_rule_candidate_review(
     payload: RuleCandidateReviewRequest,
     db: Session = Depends(get_db),
 ) -> RuleCandidateReviewResponse:
-    return _set_review_status(candidate_id, payload.review_status, db)
+    return _set_review_status(
+        candidate_id,
+        payload.review_status,
+        db,
+        tier=payload.tier,
+        auto_approved=payload.auto_approved,
+        rejection_reason=payload.rejection_reason,
+        notes=payload.notes,
+    )
 
 
 @router.post("/{candidate_id}/approve", response_model=RuleCandidateReviewResponse)
@@ -71,7 +86,64 @@ def clarify_rule_candidate(candidate_id: int, db: Session = Depends(get_db)) -> 
     return _set_review_status(candidate_id, "needs_clarification", db)
 
 
-def _set_review_status(candidate_id: int, review_status: str, db: Session) -> RuleCandidateReviewResponse:
+# ── Bulk review (used for auto-approval and staged-promotion) ─────────────
+
+class BulkReviewItem(BaseModel):
+    candidate_id: int
+    review_status: str
+    tier: str | None = None
+    auto_approved: bool | None = None
+    rejection_reason: str | None = None
+
+
+class BulkReviewRequest(BaseModel):
+    updates: list[BulkReviewItem]
+
+
+class BulkReviewResponse(BaseModel):
+    updated_count: int
+    skipped_count: int
+
+
+@router.post("/bulk-review", response_model=BulkReviewResponse)
+def bulk_review_candidates(
+    payload: BulkReviewRequest,
+    db: Session = Depends(get_db),
+) -> BulkReviewResponse:
+    """Atomically update review status for multiple candidates in one transaction.
+
+    Used by:
+    - Auto-approval on page load (tier=auto, auto_approved=True)
+    - Staged promotion gate (review_status=staged)
+    - Batch section "Approve All" action
+    """
+    for item in payload.updates:
+        if item.review_status not in ALLOWED_REVIEW_STATUSES:
+            raise AppError(
+                code="invalid_review_status",
+                message=f"Review status '{item.review_status}' is not supported.",
+                status_code=400,
+                details={"review_status": item.review_status, "allowed": sorted(ALLOWED_REVIEW_STATUSES)},
+            )
+
+    updates_dicts = [item.model_dump(exclude_none=False) for item in payload.updates]
+    updated = RuleCandidateRepository(db).bulk_update_review_status(updates_dicts)
+    skipped = len(payload.updates) - len(updated)
+    return BulkReviewResponse(updated_count=len(updated), skipped_count=skipped)
+
+
+# ── Internal helper ────────────────────────────────────────────────────────
+
+def _set_review_status(
+    candidate_id: int,
+    review_status: str,
+    db: Session,
+    *,
+    tier: str | None = None,
+    auto_approved: bool | None = None,
+    rejection_reason: str | None = None,
+    notes: str | None = None,
+) -> RuleCandidateReviewResponse:
     if review_status not in ALLOWED_REVIEW_STATUSES:
         raise AppError(
             code="invalid_review_status",
@@ -90,12 +162,26 @@ def _set_review_status(candidate_id: int, review_status: str, db: Session) -> Ru
             details={"candidate_id": candidate_id},
         )
 
-    # TODO: Replace this temporary review-status update with full approved-rule promotion flow.
     candidate.review_status = review_status
+
+    # Persist tiered-review metadata into the existing JSON column (additive, no migration)
+    meta = dict(candidate.metadata_json or {})
+    if tier is not None:
+        meta["review_tier"] = tier
+    if auto_approved is not None:
+        meta["auto_approved"] = auto_approved
+    if rejection_reason is not None:
+        meta["rejection_reason"] = rejection_reason
+    if notes is not None:
+        meta["review_notes"] = notes
+    candidate.metadata_json = meta
+
     repository.save(candidate)
     return RuleCandidateReviewResponse(
         candidate_id=candidate.candidate_id,
         review_status=candidate.review_status,
         message="Review status updated. Full approved-rule promotion is pending backend integration.",
         is_temporary_review_flow=True,
+        tier=meta.get("review_tier"),
+        rejection_reason=meta.get("rejection_reason"),
     )

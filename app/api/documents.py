@@ -1,3 +1,4 @@
+import json
 import logging
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
@@ -222,6 +223,68 @@ def get_document_exports(document_id: str, db: Session = Depends(get_db)) -> dic
     }
 
 
+@router.get("/{document_id}/intelligence-summary")
+def get_document_intelligence_summary(document_id: str, db: Session = Depends(get_db)) -> dict:
+    document_repository = DocumentRepository(db)
+    document = document_repository.get_document(document_id)
+    if document is None:
+        raise _document_not_found(document_id)
+
+    chunks = ChunkRepository(db).list_chunks_for_document(document_id)
+    candidates = RuleCandidateRepository(db).list_by_document(document_id)
+    profiles = DocumentProfileRepository(db).list_profiles(document_id)
+    export_service = LocalExportService()
+    exports = export_service.export_status(document_id)
+    quality_report = _read_quality_report(export_service, document_id)
+    quality_warnings = quality_report.get("warnings", []) if quality_report else []
+    normalized_candidates = [candidate for candidate in candidates if candidate.normalized_rule_json]
+
+    return {
+        "document_id": document.document_id,
+        "filename": document.filename,
+        "original_filename": document.original_filename,
+        "display_name": document.display_name,
+        "file_type": _document_file_type(document),
+        "source_type": document.source_type,
+        "status": document.status,
+        "display_status": _display_document_status(document.status),
+        "uploaded_at": document.uploaded_at,
+        "updated_at": document.updated_at,
+        "parser": _primary_parser(chunks, profiles),
+        "counts": {
+            "chunks": len(chunks),
+            "raw_candidates": len(candidates),
+            "rule_candidates": len(candidates),
+            "normalized_candidates": len(normalized_candidates),
+            "pending_review": _review_count(candidates, "pending_review"),
+            "approved_for_next_stage": _review_count(candidates, "approved"),
+            "needs_clarification": _review_count(candidates, "needs_clarification"),
+            "rejected": _review_count(candidates, "rejected"),
+            "quality_warnings": len(quality_warnings),
+        },
+        "pipeline": {
+            "profiled": bool(profiles) or document.status in {"profiled", "extracted", "rules_extracted", "normalized", "ready_for_review"},
+            "extracted": bool(chunks) or document.status in {"extracted", "rules_extracted", "normalized", "ready_for_review"},
+            "evidence_extracted": bool(chunks) or document.status in {"extracted", "rules_extracted", "normalized", "ready_for_review"},
+            "rules_extracted": bool(candidates) or document.status in {"rules_extracted", "normalized", "ready_for_review"},
+            "normalized": bool(normalized_candidates),
+            "review_started": any(candidate.review_status != "pending_review" for candidate in candidates),
+            "last_pipeline_step": _last_pipeline_step(document.status, chunks, candidates, normalized_candidates),
+        },
+        "next_action": _next_document_action(profiles, chunks, candidates, normalized_candidates),
+        "quality": {
+            "has_quality_report": quality_report is not None,
+            "critical_warning_count": len(quality_warnings),
+            "warnings": quality_warnings,
+            "report": quality_report,
+        },
+        "exports": [
+            {"name": name, **status}
+            for name, status in exports.items()
+        ],
+    }
+
+
 @router.post("/{document_id}/run-docintel-pipeline", response_model=DocIntelPipelineResponse)
 def run_docintel_pipeline(document_id: str, db: Session = Depends(get_db)) -> dict:
     return DocIntelPipelineService(db).run(document_id)
@@ -326,6 +389,11 @@ def extract_rules(document_id: str, normalize: bool = True, db: Session = Depend
         "llm_call_count": extraction_debug.get("llm_call_count", 0),
         "deterministic_candidate_count": extraction_debug.get("deterministic_candidate_count", 0),
         "llm_candidate_count": extraction_debug.get("llm_candidate_count", len(candidates)),
+        "raw_rule_candidates_created": len(candidates),
+        "normalized_rule_candidates_created": len([candidate for candidate in candidates if candidate.normalized_rule_json]),
+        "quality_warning_count": len(quality_report.get("warnings", [])),
+        "pipeline_stage": "rules_extracted",
+        "exports": LocalExportService().export_status(document_id),
         "warnings": warnings,
     }
     return summary
@@ -358,15 +426,57 @@ def normalize_document_rule_candidates(document_id: str, db: Session = Depends(g
     }
 
 
-@router.get("/{document_id}/rule-candidates", response_model=RuleCandidateListResponse)
+@router.get("/{document_id}/rule-candidates")
 def get_document_rule_candidates(document_id: str, db: Session = Depends(get_db)) -> dict:
     if DocumentRepository(db).get_document(document_id) is None:
         raise _document_not_found(document_id)
 
     candidates = RuleCandidateRepository(db).list_by_document(document_id)
+
+    # Batch-fetch source chunks to enrich candidates with document location
+    chunk_ids = {c.source_chunk_id for c in candidates if c.source_chunk_id}
+    chunks_by_id = {
+        chunk.chunk_id: chunk
+        for chunk in ChunkRepository(db).get_by_ids(chunk_ids)
+    }
+
+    enriched = []
+    for candidate in candidates:
+        chunk = chunks_by_id.get(candidate.source_chunk_id)
+        entry = {
+            "candidate_id": candidate.candidate_id,
+            "document_id": candidate.document_id,
+            "source_chunk_id": candidate.source_chunk_id,
+            "rule_id": candidate.rule_id,
+            "rule_type": candidate.rule_type,
+            "condition_logic": candidate.condition_logic,
+            "conditions_json": candidate.conditions_json,
+            "requirement_json": candidate.requirement_json,
+            "severity": candidate.severity,
+            "confidence_score": candidate.confidence_score,
+            "confidence_reason": candidate.confidence_reason,
+            "explanation": candidate.explanation,
+            "source_excerpt": candidate.source_excerpt,
+            "review_status": candidate.review_status,
+            "normalization_status": candidate.normalization_status,
+            "raw_llm_output_json": candidate.raw_llm_output_json,
+            "normalized_rule_json": candidate.normalized_rule_json,
+            "validation_errors_json": candidate.validation_errors_json,
+            "created_at": candidate.created_at,
+            "updated_at": candidate.updated_at,
+            # Enriched chunk location fields
+            "source_page": chunk.page_number if chunk else None,
+            "source_section": chunk.section_title if chunk else None,
+            "source_section_path": chunk.section_path_json if chunk else None,
+            "source_chunk_index": chunk.chunk_index if chunk else None,
+            "source_chunk_type": chunk.chunk_type if chunk else None,
+            "source_semantic_zone": chunk.semantic_zone if chunk else None,
+        }
+        enriched.append(entry)
+
     return {
         "document_id": document_id,
-        "rule_candidates": candidates,
+        "rule_candidates": enriched,
     }
 
 
@@ -400,3 +510,72 @@ def _field_summary(chunks: list, field: str) -> dict[str, int]:
         value = getattr(chunk, field, None) or "unknown"
         summary[value] = summary.get(value, 0) + 1
     return summary
+
+
+def _display_document_status(status: str) -> str:
+    return {
+        "uploaded": "Uploaded",
+        "profiled": "Profiled",
+        "extracted": "Evidence Extracted",
+        "rules_extracted": "Rules Extracted",
+        "normalized": "Ready for Review",
+        "ready_for_review": "Ready for Review",
+        "processing": "Processing",
+        "failed": "Processing Failed",
+    }.get(status, status.replace("_", " ").title())
+
+
+def _document_file_type(document: Document) -> str:
+    return document.file_type
+
+
+def _primary_parser(chunks: list, profiles: list) -> str | None:
+    for chunk in chunks:
+        if chunk.source_parser:
+            return chunk.source_parser
+        if chunk.extraction_method:
+            return chunk.extraction_method
+    for profile in profiles:
+        if profile.recommended_extractor:
+            return profile.recommended_extractor
+    return None
+
+
+def _review_count(candidates: list, status: str) -> int:
+    return sum(1 for candidate in candidates if candidate.review_status == status)
+
+
+def _last_pipeline_step(document_status: str, chunks: list, candidates: list, normalized_candidates: list) -> str:
+    if normalized_candidates:
+        return "normalize_candidates"
+    if candidates:
+        return "extract_rule_candidates"
+    if chunks:
+        return "extract_structure_evidence"
+    if document_status == "profiled":
+        return "profile_document"
+    return document_status
+
+
+def _read_quality_report(export_service: LocalExportService, document_id: str) -> dict | None:
+    path = export_service.export_path(document_id, "candidate_quality_report")
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _next_document_action(profiles: list, chunks: list, candidates: list, normalized_candidates: list) -> dict:
+    if not profiles:
+        return {"label": "Run Profile", "target_tab": "processing"}
+    if not chunks:
+        return {"label": "Extract Evidence", "target_tab": "processing"}
+    if not candidates:
+        return {"label": "Extract Rules", "target_tab": "processing"}
+    if not normalized_candidates:
+        return {"label": "Normalize Candidates", "target_tab": "processing"}
+    if any(candidate.review_status == "pending_review" for candidate in candidates):
+        return {"label": "Review rule candidates", "target_tab": "rule_review"}
+    return {"label": "View Handoff Package", "target_tab": "handoff"}

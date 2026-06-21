@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -40,3 +42,34 @@ class RuleCandidateRepository:
         self.db.commit()
         self.db.refresh(candidate)
         return candidate
+
+    def bulk_update_review_status(self, updates: list[dict]) -> list[RuleCandidate]:
+        """Atomically apply review-status updates for multiple candidates.
+
+        Each dict in ``updates`` must have ``candidate_id`` (int) and
+        ``review_status`` (str). Optional keys: ``tier``, ``auto_approved``,
+        ``rejection_reason`` — these are merged into ``metadata_json``.
+        Returns the list of updated candidates (only those found in DB).
+        """
+        updated: list[RuleCandidate] = []
+        for item in updates:
+            candidate = self.db.get(RuleCandidate, item["candidate_id"])
+            if candidate is None:
+                continue
+            candidate.review_status = item["review_status"]
+            # Merge optional review metadata into the JSON column
+            meta = dict(candidate.metadata_json or {})
+            if "tier" in item:
+                meta["review_tier"] = item["tier"]
+            if "auto_approved" in item:
+                meta["auto_approved"] = item["auto_approved"]
+            if "rejection_reason" in item:
+                meta["rejection_reason"] = item["rejection_reason"]
+            meta["reviewed_at"] = datetime.now(UTC).isoformat()
+            candidate.metadata_json = meta
+            updated.append(candidate)
+        if updated:
+            self.db.commit()
+            for c in updated:
+                self.db.refresh(c)
+        return updated

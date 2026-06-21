@@ -77,6 +77,8 @@ def test_full_docintel_pipeline_for_mock_release_notes():
     assert all(candidate["review_status"] == "pending_review" for candidate in candidates)
     assert all(candidate["normalized_rule_json"] for candidate in candidates)
     assert document_response.json()["status"] == "rules_extracted"
+    assert document_response.json()["display_name"] == "mock_release_notes.txt"
+    assert document_response.json()["file_type"] == "text/plain"
     assert exports_response.status_code == 200
     assert all(item["exists"] for item in exports_response.json()["exports"].values())
     quality_report_path = Path(body["exports"]["candidate_quality_report"])
@@ -167,6 +169,36 @@ def test_export_normalized_rule_candidates():
     assert body["export_type"] == "normalized_rule_candidates"
     assert body["rule_candidates"]
     assert body["rule_candidates"][0]["review_status"] == "pending_review"
+
+
+def test_document_intelligence_summary_endpoint():
+    document_id = upload_file(
+        "mock_release_notes.txt",
+        b"Windows Server 2012 requires BIOS 1.3.5 or later.",
+        "text/plain",
+    )
+    client.post(f"/api/documents/{document_id}/run-docintel-pipeline")
+
+    response = client.get(f"/api/documents/{document_id}/intelligence-summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_id"] == document_id
+    assert body["display_status"] == "Rules Extracted"
+    assert body["display_name"] == "mock_release_notes.txt"
+    assert body["counts"]["chunks"] >= 1
+    assert body["counts"]["raw_candidates"] >= 1
+    assert body["counts"]["rule_candidates"] >= 1
+    assert body["counts"]["normalized_candidates"] >= 1
+    assert body["counts"]["pending_review"] >= 1
+    assert body["pipeline"]["profiled"] is True
+    assert body["pipeline"]["extracted"] is True
+    assert body["pipeline"]["evidence_extracted"] is True
+    assert body["pipeline"]["rules_extracted"] is True
+    assert body["pipeline"]["normalized"] is True
+    assert body["next_action"]["target_tab"] in {"processing", "rule_review", "handoff"}
+    assert body["quality"]["has_quality_report"] is True
+    assert any(item["name"] == "normalized_rule_candidates" for item in body["exports"])
 
 
 def test_temporary_rule_candidate_review_endpoint_updates_status():

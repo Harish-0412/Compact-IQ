@@ -54,3 +54,9 @@ class ChunkRepository:
 
     def get_chunk(self, chunk_id: int) -> DocumentChunk | None:
         return self.db.get(DocumentChunk, chunk_id)
+
+    def get_by_ids(self, chunk_ids: set[int]) -> list[DocumentChunk]:
+        if not chunk_ids:
+            return []
+        statement = select(DocumentChunk).where(DocumentChunk.chunk_id.in_(chunk_ids))
+        return list(self.db.scalars(statement).all())

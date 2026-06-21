@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any, Protocol
 
 import httpx
@@ -6,6 +7,8 @@ import httpx
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.services.json_repair import repair_json
+
+logger = logging.getLogger(__name__)
 
 
 class LLMService(Protocol):
@@ -145,10 +148,10 @@ class OllamaCloudLLMService:
 
         try:
             if self.client is not None:
-                response = self.client.post(url, json=payload, headers=headers, timeout=timeout)
+                response = self._post_with_retry(self.client, url, payload, headers, timeout)
             else:
                 with httpx.Client() as client:
-                    response = client.post(url, json=payload, headers=headers, timeout=timeout)
+                    response = self._post_with_retry(client, url, payload, headers, timeout)
         except httpx.TimeoutException as exc:
             raise self._adapter_error("llm_timeout", "Ollama request timed out.", details={"timeout_seconds": timeout}) from exc
         except httpx.HTTPError as exc:
@@ -225,6 +228,43 @@ class OllamaCloudLLMService:
             path = f"/{path}"
         return f"{base_url}{path}"
 
+    def _post_with_retry(
+        self,
+        client: httpx.Client,
+        url: str,
+        payload: dict,
+        headers: dict,
+        timeout: int,
+        *,
+        max_retries: int = 3,
+    ) -> httpx.Response:
+        """POST with exponential backoff on transient connection-reset errors.
+
+        Ollama Cloud (Google Frontend) forcibly drops TCP connections when many
+        requests arrive in rapid succession (e.g., one per chunk during rule
+        extraction).  Retrying with a small back-off resolves this without any
+        change to the core pipeline logic.
+        """
+        import time
+
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                return client.post(url, json=payload, headers=headers, timeout=timeout)
+            except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError) as exc:
+                last_exc = exc
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                logger.warning(
+                    "ollama transient connection error (attempt %d/%d), retrying in %ds: %s",
+                    attempt + 1,
+                    max_retries,
+                    wait,
+                    exc,
+                )
+                time.sleep(wait)
+        # All retries exhausted — re-raise so the outer handler can wrap it
+        raise last_exc  # type: ignore[misc]
+
     def _adapter_error(
         self,
         code: str,
@@ -241,9 +281,26 @@ class OllamaCloudLLMService:
 
 
 class LLMServiceFactory:
+    # A single persistent client shared across all calls within a process lifetime.
+    # This avoids opening a new TCP connection per LLM call (which triggers
+    # rate-limiting on the Ollama Cloud / Google Frontend load balancer).
+    _shared_client: httpx.Client | None = None
+
+    @classmethod
+    def _get_shared_client(cls) -> httpx.Client:
+        if cls._shared_client is None or cls._shared_client.is_closed:
+            cls._shared_client = httpx.Client(
+                # Keep-alive pool: up to 5 connections, 30-second idle timeout
+                limits=httpx.Limits(max_keepalive_connections=5, keepalive_expiry=30),
+            )
+        return cls._shared_client
+
     @staticmethod
     def create(settings: Settings | None = None) -> LLMService:
         resolved_settings = settings or get_settings()
         if resolved_settings.use_mock_llm:
             return MockLLMService(model=resolved_settings.ollama_model)
-        return OllamaCloudLLMService(settings=resolved_settings)
+        return OllamaCloudLLMService(
+            settings=resolved_settings,
+            client=LLMServiceFactory._get_shared_client(),
+        )

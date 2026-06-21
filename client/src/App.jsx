@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import DocumentIntelligenceWorkbench from "./components/document-intelligence/DocumentIntelligenceWorkbench";
 
 // ─────────────────────────────────────────────
 // Constants
@@ -374,8 +375,8 @@ function App() {
         )}
         <header className="topbar">
           <div>
-            <div className="breadcrumb">CompatIQ / {page === "AuditLog" ? "Audit Log" : page}</div>
-            <h1>{page === "AuditLog" ? "Audit Log" : page}</h1>
+            <div className="breadcrumb">CompatIQ / {page === "AuditLog" ? "Audit Log" : page === "Overview" ? "Document Intelligence" : page}</div>
+            <h1>{page === "AuditLog" ? "Audit Log" : page === "Overview" ? "Document Intelligence" : page}</h1>
           </div>
           <div className="topbar-actions">
             <input className="global-search" placeholder="Search across all records…" disabled />
@@ -390,8 +391,8 @@ function App() {
               </svg>
               Audit Log
             </button>
-            {/* Connect Data button — Documents and Inventory pages */}
-            {(page === "Documents" || page === "Inventory") && (
+            {/* Connect Data button — Inventory page */}
+            {page === "Inventory" && (
               <button
                 className={`primary-button connect-data-btn ${dbUrl ? "connected" : ""}`}
                 id="connect-data-btn"
@@ -404,21 +405,8 @@ function App() {
           </div>
         </header>
         <main className="main-content">
-          {page === "Overview"   && (
-            <Overview
-              backendOnline={backendOnline}
-              analysisRun={analysisRun}
-              setAnalysisRun={setAnalysisRun}
-              docCount={docCount}
-              rulesExtractedCount={rulesExtractedCount}
-              rulesApprovedCount={rulesApprovedCount}
-              devicesCount={devicesCount}
-              violationsCount={violationsCount}
-            />
-          )}
-          {page === "Documents"  && (
-            <Documents
-              dbUrl={dbUrl}
+          {(page === "Overview" || page === "Documents") && (
+            <DocumentIntelligenceWorkbench
               backendOnline={backendOnline}
             />
           )}
@@ -1286,6 +1274,10 @@ const normalizeCandidate = (c) => {
 };
 
 function Documents({ dbUrl, backendOnline }) {
+  return <DocumentIntelligenceWorkbench backendOnline={backendOnline} />;
+}
+
+function LegacyDocuments({ dbUrl, backendOnline }) {
   const [section, setSection] = useState("Document Library");
   const [documents, setDocuments] = useState([]);
   const [selectedDocument, setSelectedDocument] = useState(null);

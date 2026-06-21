@@ -1,8 +1,36 @@
 # CompatIQ Document Intelligence Service
 
-FastAPI-first backend for the CompatIQ Member 3 Document Intelligence Engine.
+FastAPI-first backend for the CompatIQ Member 3 Document Intelligence Engine, including the React frontend UI.
 
-The service supports upload, profiling, extraction, chunking, mock/Ollama LLM rule extraction, deterministic normalization, local JSON exports, and teammate handoff endpoints. Final rule approval and compliance scanning are not implemented.
+The service supports document upload, profiling, extraction, chunking, rule candidate extraction, deterministic normalization, local JSON exports, and the **new Tiered Human Rule Review UI**.
+
+## 🚀 Quick Start for Teammates
+
+### 1. Start the Database (PostgreSQL)
+```powershell
+docker compose up -d
+python scripts/create_tables.py
+```
+
+### 2. Start the Backend (FastAPI)
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+uvicorn app.main:app --reload
+```
+*API runs at http://127.0.0.1:8000*
+
+### 3. Start the Frontend (Vite + React)
+Open a new terminal:
+```powershell
+cd client
+npm install
+npm run dev
+```
+*UI runs at http://localhost:5173*
+
+---
 
 ## Repository Layout
 
@@ -53,7 +81,6 @@ The frontend is a Vite React app in `client/`.
 
 ```powershell
 cd client
-npm install
 npm run dev
 ```
 
@@ -684,5 +711,6 @@ pytest
 - Normalization and validation: complete
 - Full demo pipeline endpoint: complete
 - Handoff/export contract: complete
+- Tiered Human Rule Review UI (Auto/Batch/Individual): complete
 - Optional Docling/Chandra adapter integration: complete with mocked tests
-- Approval and compliance scanning: not started
+- Compliance scanning: not started

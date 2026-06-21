@@ -48,6 +48,17 @@ class Document(Base):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def display_name(self) -> str:
+        return self.original_filename or self.filename or self.document_id
+
+    @property
+    def file_type(self) -> str:
+        if self.content_type:
+            return self.content_type
+        suffix = self.filename.rsplit(".", 1)[-1] if "." in self.filename else ""
+        return suffix.lower() or self.source_type
+
 
 class ExtractionJob(Base):
     __tablename__ = "extraction_jobs"

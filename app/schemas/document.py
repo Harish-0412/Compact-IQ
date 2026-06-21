@@ -17,6 +17,8 @@ class DocumentUploadResponse(BaseModel):
 class DocumentResponse(DocumentUploadResponse):
     file_path: str
     content_type: str | None
+    display_name: str
+    file_type: str
     uploaded_at: datetime
     updated_at: datetime
     metadata_json: dict
